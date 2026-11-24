@@ -1,1 +1,1 @@
-window.DEFAULT_RELAY_URL = "https://rca-journalism-quote-translator.trycloudflare.com";
+window.DEFAULT_RELAY_URL = "https://polar-sunglasses-lincoln-doubt.trycloudflare.com";
