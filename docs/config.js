@@ -1,1 +1,1 @@
-window.DEFAULT_RELAY_URL = "https://flip-soil-representatives-paso.trycloudflare.com";
+window.DEFAULT_RELAY_URL = "https://theory-evening-civil-desirable.trycloudflare.com";
