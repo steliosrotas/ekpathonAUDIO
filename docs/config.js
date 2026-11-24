@@ -1,1 +1,1 @@
-window.DEFAULT_RELAY_URL = "https://theory-evening-civil-desirable.trycloudflare.com";
+window.DEFAULT_RELAY_URL = "https://developer-cord-paperbacks-disclaimers.trycloudflare.com";
