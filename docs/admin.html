@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audio Stream Admin</title>
+  <style>
+    :root { --bg: #0f172a; --card: #1e293b; --input: #0f172a; --text: #f8fafc; --muted: #94a3b8; --accent: #38bdf8; --danger: #ef4444; }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text); padding: 16px; }
+    .card { width: 100%; max-width: 520px; background: var(--card); border-radius: 16px; padding: 26px; box-shadow: 0 16px 40px rgba(0,0,0,.4); }
+    h1 { margin: 0 0 18px; font-size: 20px; display: flex; justify-content: space-between; align-items: center; }
+    h1 a { font-size: 13px; color: var(--accent); text-decoration: none; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 5px; }
+    input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #334155; background: var(--input); color: var(--text); font-size: 14px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
+    button { padding: 12px; border: 0; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; }
+    .btn-go { background: var(--accent); color: #0f172a; }
+    .btn-stop { background: var(--danger); color: #fff; }
+    .status-box { margin-top: 18px; padding: 14px; border-radius: 10px; background: rgba(15,23,42,.6); font-size: 13px; line-height: 1.6; color: var(--muted); }
+    .status-box strong { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Admin Control Panel <a href="index.html">Listener Page →</a></h1>
+
+    <label for="server">Relay Server URL</label>
+    <input id="server" type="url" placeholder="https://your-tunnel.trycloudflare.com" />
+
+    <label for="adminPass">Admin Password</label>
+    <input id="adminPass" type="password" placeholder="ADMIN_PASSWORD set on server" />
+
+    <label for="streamUrl">Livestream URL (YouTube, Twitch, Uniflix, .m3u8, etc.)</label>
+    <input id="streamUrl" type="url" placeholder="https://..." />
+
+    <div class="row">
+      <div>
+        <label for="ssoUser">SSO Username (optional)</label>
+        <input id="ssoUser" type="text" autocomplete="off" />
+      </div>
+      <div>
+        <label for="ssoPass">SSO Password (optional)</label>
+        <input id="ssoPass" type="password" autocomplete="off" />
+      </div>
+    </div>
+
+    <label for="delaySec">Buffer Delay Behind Live (seconds)</label>
+    <input id="delaySec" type="number" min="0" max="60" value="10" />
+
+    <div class="actions">
+      <button class="btn-go" id="startBtn">Go Live</button>
+      <button class="btn-stop" id="stopBtn">Clear (Output Silence)</button>
+    </div>
+
+    <div class="status-box" id="statusBox">Waiting for server status...</div>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const serverInput = document.getElementById("server");
+    const adminPassInput = document.getElementById("adminPass");
+    const streamUrlInput = document.getElementById("streamUrl");
+    const ssoUserInput = document.getElementById("ssoUser");
+    const ssoPassInput = document.getElementById("ssoPass");
+    const delayInput = document.getElementById("delaySec");
+    const statusBox = document.getElementById("statusBox");
+
+    serverInput.value = (params.get("server") || window.DEFAULT_RELAY_URL || "").replace(/\/+$/, "");
+    adminPassInput.value = sessionStorage.getItem("relay_admin_pass") || "";
+
+    function getServer() {
+      return serverInput.value.trim().replace(/\/+$/, "");
+    }
+
+    async function callAdmin(path, body = null) {
+      const pass = adminPassInput.value;
+      sessionStorage.setItem("relay_admin_pass", pass);
+
+      const res = await fetch(`${getServer()}${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Password": pass,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        alert("Request failed: " + (err.detail || res.status));
+        return;
+      }
+      renderStatus(await res.json());
+    }
+
+    document.getElementById("startBtn").addEventListener("click", () => {
+      if (!streamUrlInput.value.trim()) {
+        alert("Enter a livestream URL first.");
+        return;
+      }
+      callAdmin("/api/admin/start", {
+        url: streamUrlInput.value.trim(),
+        delay_seconds: parseInt(delayInput.value, 10) || 10,
+        username: ssoUserInput.value.trim(),
+        password: ssoPassInput.value,
+      });
+    });
+
+    document.getElementById("stopBtn").addEventListener("click", () => {
+      callAdmin("/api/admin/stop");
+    });
+
+    function renderStatus(d) {
+      statusBox.innerHTML =
+        `<div>State: <strong>${d.state.toUpperCase()}</strong></div>` +
+        `<div>Message: <strong>${d.message}</strong></div>` +
+        `<div>Title: <strong>${d.title || "—"}</strong></div>` +
+        `<div>Buffer: <strong>${d.buffered_seconds}s / ${d.delay_seconds}s</strong> · Listeners: <strong>${d.listeners}</strong></div>`;
+    }
+
+    async function poll() {
+      const s = getServer();
+      if (!s) return;
+      try {
+        const res = await fetch(`${s}/api/status`, { cache: "no-store" });
+        renderStatus(await res.json());
+      } catch {
+        statusBox.textContent = "Cannot reach relay server at " + s;
+      }
+    }
+
+    poll();
+    setInterval(poll, 3000);
+  </script>
+</body>
+</html>
