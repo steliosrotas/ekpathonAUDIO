@@ -26,8 +26,8 @@
   <div class="card">
     <h1>Admin Control Panel <a href="index.html">Listener Page →</a></h1>
 
-    <label for="server">Relay Server URL</label>
-    <input id="server" type="url" placeholder="https://your-tunnel.trycloudflare.com" />
+    <label for="server">Relay Server URL (auto-updates)</label>
+    <input id="server" type="url" autocomplete="off" placeholder="https://your-tunnel.trycloudflare.com" />
 
     <label for="adminPass">Admin Password</label>
     <input id="adminPass" type="password" placeholder="ADMIN_PASSWORD set on server" />
@@ -54,12 +54,15 @@
       <button class="btn-stop" id="stopBtn">Clear (Output Silence)</button>
     </div>
 
-    <div class="status-box" id="statusBox">Waiting for server status...</div>
+    <div class="status-box" id="statusBox">Syncing relay server URL...</div>
   </div>
 
   <script src="config.js"></script>
   <script>
+    const REPO_RELAY_API = "https://api.github.com/repos/steliosrotas/ekpathonAUDIO/contents/docs/relay.json";
     const params = new URLSearchParams(location.search);
+    const forcedServer = (params.get("server") || "").replace(/\/+$/, "");
+
     const serverInput = document.getElementById("server");
     const adminPassInput = document.getElementById("adminPass");
     const streamUrlInput = document.getElementById("streamUrl");
@@ -68,11 +71,46 @@
     const delayInput = document.getElementById("delaySec");
     const statusBox = document.getElementById("statusBox");
 
-    serverInput.value = (params.get("server") || window.DEFAULT_RELAY_URL || "").replace(/\/+$/, "");
+    let lastLookup = 0;
+
+    serverInput.value = forcedServer || (window.DEFAULT_RELAY_URL || "").replace(/\/+$/, "");
     adminPassInput.value = sessionStorage.getItem("relay_admin_pass") || "";
 
     function getServer() {
       return serverInput.value.trim().replace(/\/+$/, "");
+    }
+
+    async function fetchLatestRelayUrl(force = false) {
+      if (forcedServer) return false;
+      const now = Date.now();
+      if (!force && now - lastLookup < 15000) return false;
+      lastLookup = now;
+
+      let discovered = "";
+      try {
+        const res = await fetch(REPO_RELAY_API, { cache: "no-store" });
+        if (res.ok) {
+          const meta = await res.json();
+          const parsed = JSON.parse(atob(meta.content.replace(/\s/g, "")));
+          discovered = (parsed.url || "").trim().replace(/\/+$/, "");
+        }
+      } catch {}
+
+      if (!discovered) {
+        try {
+          const res = await fetch(`relay.json?t=${Date.now()}`, { cache: "no-store" });
+          if (res.ok) {
+            const parsed = await res.json();
+            discovered = (parsed.url || "").trim().replace(/\/+$/, "");
+          }
+        } catch {}
+      }
+
+      if (discovered && discovered !== getServer() && document.activeElement !== serverInput) {
+        serverInput.value = discovered;
+        return true;
+      }
+      return false;
     }
 
     async function callAdmin(path, body = null) {
@@ -123,17 +161,27 @@
 
     async function poll() {
       const s = getServer();
-      if (!s) return;
+      if (!s) {
+        const updated = await fetchLatestRelayUrl(false);
+        if (updated) return poll();
+        return;
+      }
       try {
         const res = await fetch(`${s}/api/status`, { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
         renderStatus(await res.json());
       } catch {
+        const updated = await fetchLatestRelayUrl(false);
+        if (updated) return poll();
         statusBox.textContent = "Cannot reach relay server at " + s;
       }
     }
 
-    poll();
-    setInterval(poll, 3000);
+    (async () => {
+      await fetchLatestRelayUrl(true);
+      poll();
+      setInterval(poll, 3000);
+    })();
   </script>
 </body>
 </html>

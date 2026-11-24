@@ -41,8 +41,9 @@
 
   <script src="config.js"></script>
   <script>
+    const REPO_RELAY_API = "https://api.github.com/repos/steliosrotas/ekpathonAUDIO/contents/docs/relay.json";
     const params = new URLSearchParams(location.search);
-    const serverUrl = (params.get("server") || window.DEFAULT_RELAY_URL || "").replace(/\/+$/, "");
+    const forcedServer = (params.get("server") || "").replace(/\/+$/, "");
 
     const player = document.getElementById("player");
     const toggleBtn = document.getElementById("toggleBtn");
@@ -52,25 +53,63 @@
     const titleEl = document.getElementById("title");
     const statusMsg = document.getElementById("statusMsg");
 
+    let serverUrl = forcedServer || (window.DEFAULT_RELAY_URL || "").replace(/\/+$/, "");
     let listening = false;
-    player.volume = parseFloat(volumeEl.value);
+    let lastLookup = 0;
 
+    player.volume = parseFloat(volumeEl.value);
     volumeEl.addEventListener("input", () => {
       player.volume = parseFloat(volumeEl.value);
     });
 
+    async function fetchLatestRelayUrl(force = false) {
+      if (forcedServer) return false;
+      const now = Date.now();
+      if (!force && now - lastLookup < 15000) return false;
+      lastLookup = now;
+
+      let discovered = "";
+      try {
+        const res = await fetch(REPO_RELAY_API, { cache: "no-store" });
+        if (res.ok) {
+          const meta = await res.json();
+          const parsed = JSON.parse(atob(meta.content.replace(/\s/g, "")));
+          discovered = (parsed.url || "").trim().replace(/\/+$/, "");
+        }
+      } catch {}
+
+      if (!discovered) {
+        try {
+          const res = await fetch(`relay.json?t=${Date.now()}`, { cache: "no-store" });
+          if (res.ok) {
+            const parsed = await res.json();
+            discovered = (parsed.url || "").trim().replace(/\/+$/, "");
+          }
+        } catch {}
+      }
+
+      if (discovered && discovered !== serverUrl) {
+        serverUrl = discovered;
+        if (listening) startAudio();
+        return true;
+      }
+      return false;
+    }
+
     function startAudio() {
+      if (!serverUrl) return;
       player.src = `${serverUrl}/audio?t=${Date.now()}`;
       player.play().catch((err) => {
         statusMsg.textContent = "Playback error: " + err.message;
       });
     }
 
-    toggleBtn.addEventListener("click", () => {
+    toggleBtn.addEventListener("click", async () => {
       if (!listening) {
         listening = true;
         toggleBtn.textContent = "Disconnect";
         toggleBtn.classList.add("playing");
+        if (!serverUrl) await fetchLatestRelayUrl(true);
         startAudio();
       } else {
         listening = false;
@@ -82,14 +121,20 @@
       }
     });
 
-    // Auto-reconnect if the continuous audio stream ever drops
-    player.addEventListener("error", () => {
-      if (listening) setTimeout(startAudio, 2500);
+    player.addEventListener("error", async () => {
+      if (!listening) return;
+      await fetchLatestRelayUrl(false);
+      setTimeout(() => { if (listening) startAudio(); }, 2500);
     });
 
     async function pollStatus() {
+      if (!serverUrl) {
+        await fetchLatestRelayUrl(false);
+        if (!serverUrl) return;
+      }
       try {
         const res = await fetch(`${serverUrl}/api/status`, { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
 
         const isLive = data.state === "live";
@@ -103,14 +148,19 @@
         titleEl.textContent = data.title || "No Livestream Linked";
         statusMsg.textContent = data.message;
       } catch {
+        const updated = await fetchLatestRelayUrl(false);
+        if (updated) return pollStatus();
         badge.classList.remove("live");
         badgeText.textContent = "SERVER OFFLINE";
         statusMsg.textContent = "Cannot reach the audio relay server.";
       }
     }
 
-    pollStatus();
-    setInterval(pollStatus, 3000);
+    (async () => {
+      await fetchLatestRelayUrl(true);
+      pollStatus();
+      setInterval(pollStatus, 3000);
+    })();
   </script>
 </body>
 </html>
