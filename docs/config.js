@@ -1,1 +1,1 @@
-window.DEFAULT_RELAY_URL = "https://developer-cord-paperbacks-disclaimers.trycloudflare.com";
+window.DEFAULT_RELAY_URL = "https://asp-pond-baseball-revolutionary.trycloudflare.com";
