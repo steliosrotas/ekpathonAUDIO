@@ -1,1 +1,1 @@
-window.DEFAULT_RELAY_URL = "https://asp-pond-baseball-revolutionary.trycloudflare.com";
+window.DEFAULT_RELAY_URL = "https://one-powerful-bend-bizrate.trycloudflare.com";
